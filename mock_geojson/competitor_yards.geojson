@@ -1,0 +1,1 @@
+{"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {"owner": "Competitor A"}, "geometry": {"type": "Polygon", "coordinates": [[[83.3, 17.72], [83.305, 17.72], [83.305, 17.725], [83.3, 17.725], [83.3, 17.72]]]}}]}

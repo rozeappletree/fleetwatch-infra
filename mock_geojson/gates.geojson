@@ -1,0 +1,1 @@
+{"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {"name": "Gate 1", "gate_type": "Entry"}, "geometry": {"type": "Point", "coordinates": [83.275, 17.695]}}]}

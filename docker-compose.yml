@@ -1,0 +1,124 @@
+version: '3.8'
+
+services:
+
+  # ── Mosquitto MQTT Broker ─────────────────────────────────────────────────
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    restart: unless-stopped
+    networks:
+      - fleet_net
+
+  # ── Redis Stack 7.4 ───────────────────────────────────────────────────────
+  redis:
+    image: redis/redis-stack-server:7.4.0-v3
+    build: ./redis
+    expose:
+      - 6379
+    ports:
+      - "6379:6379"
+    env_file:
+      - ./envs/redis.env
+    volumes:
+      - ./redis/:/redis/
+      - redis_data:/data/
+    restart: unless-stopped
+    networks:
+      - fleet_net
+
+  # ── PostGIS 16-3.5 ───────────────────────────────────────────────────────
+  postgis:
+    image: postgis/postgis:16-3.5
+    expose:
+      - 5432
+    ports:
+      - "5433:5432"
+    env_file:
+      - ./envs/postgres.env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+      - ./postgis/:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - fleet_net
+
+  # ── Fleet Go Worker (MQTT → Redis + Geofence) ─────────────────────────────
+  mqtt:
+    image: dmw2151/fleet_worker
+    build:
+      context: ./hslservices/
+      dockerfile: ./cmd/mqtt/Dockerfile
+    depends_on:
+      - mosquitto
+      - redis
+      - postgis
+    environment:
+      MQTT_BROKER: mosquitto
+      MQTT_PORT:   "1883"
+      MQTT_TOPIC:  "trucks/#"
+    env_file:
+      - ./envs/redis.env
+      - ./envs/postgres.env
+    restart: unless-stopped
+    networks:
+      - fleet_net
+
+  # ── Locations WebSocket API ───────────────────────────────────────────────
+  locations_api:
+    image: dmw2151/locations_api
+    build:
+      context: ./hslservices/
+      dockerfile: ./cmd/locations/Dockerfile
+    expose:
+      - 2152
+    ports:
+      - "2152:2152"
+    depends_on:
+      redis:
+        condition: service_started
+      postgis:
+        condition: service_healthy
+    environment:
+      PG_DSN: "host=postgis port=5432 dbname=postgres user=postgres password=postgres sslmode=disable"
+    env_file:
+      - ./envs/redis.env
+    networks:
+      - fleet_net
+
+  # ── Fleet Dashboard — nginx serving React Leaflet app ────────────────────
+  frontend:
+    image: fleet_dashboard
+    build: ./frontend/
+    depends_on:
+      - redis
+      - mqtt
+      - locations_api
+    ports:
+      - "8080:8080"
+    env_file:
+      - ./envs/hslweb.env
+    restart: unless-stopped
+    networks:
+      - fleet_net
+
+volumes:
+  postgres_data:
+  redis_data:
+  mosquitto_data:
+  mosquitto_log:
+
+networks:
+  fleet_net:
+    driver: bridge

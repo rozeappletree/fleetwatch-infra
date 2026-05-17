@@ -1,0 +1,1 @@
+{"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {"name": "Main Client Yard", "capacity": 5000}, "geometry": {"type": "Polygon", "coordinates": [[[83.29, 17.71], [83.295, 17.71], [83.295, 17.715], [83.29, 17.715], [83.29, 17.71]]]}}]}

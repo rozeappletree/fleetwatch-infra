@@ -1,0 +1,7 @@
+/tilegen/tiles/**
+/frontend/.cache/
+/frontend/node_modules/
+/frontend/dist/
+/deploy/**
+/driver_app/
+

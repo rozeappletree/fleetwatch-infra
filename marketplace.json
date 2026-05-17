@@ -1,0 +1,23 @@
+{
+    "app_name": "FleetTrack India — Real-Time Truck Tracking",
+    "description": "Production-grade Indian fleet & truck tracking platform. Driver Flutter app → Mosquitto MQTT → Go worker → Redis TimeSeries → PostGIS → OpenStreetMap dashboard.",
+    "featured": true,
+    "rank": 40,
+    "type": "Full App",
+    "contributed_by": "Community",
+    "repo_url": "https://github.com/cheeku1855/fleet-tracker-india",
+    "preview_image_url": "",
+    "download_url": "",
+    "hosted_url": "",
+    "quick_deploy": "false",
+    "deploy_buttons": [],
+    "language": ["Go", "Python", "Dart"],
+    "redis_commands": ["TS.ADD", "TS.CREATE", "PUBLISH", "SUBSCRIBE", "XADD", "SADD", "TS.CREATERULE", "TS.MRANGE"],
+    "redis_use_cases": ["Pub/Sub", "Streams", "Time Series"],
+    "redis_features": ["Time Series", "Triggers and Functions"],
+    "app_image_urls": [],
+    "youtube_url": "",
+    "special_tags": ["Fleet", "IoT", "India", "GPS"],
+    "verticals": ["Logistics", "Transportation"],
+    "markdown": ""
+}

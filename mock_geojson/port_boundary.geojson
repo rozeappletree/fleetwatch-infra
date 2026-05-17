@@ -1,0 +1,1 @@
+{"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {"name": "Vizag Port Area"}, "geometry": {"type": "Polygon", "coordinates": [[[83.260625, 17.75], [83.5059, 17.75], [83.5059, 17.568061], [83.260625, 17.568061], [83.260625, 17.75]]]}}]}

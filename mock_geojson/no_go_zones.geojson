@@ -1,0 +1,1 @@
+{"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {"name": "Hazardous Area", "severity": "high"}, "geometry": {"type": "Polygon", "coordinates": [[[83.31, 17.69], [83.315, 17.69], [83.315, 17.695], [83.31, 17.695], [83.31, 17.69]]]}}]}

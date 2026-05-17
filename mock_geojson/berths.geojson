@@ -1,0 +1,1 @@
+{"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {"name": "Berth 1", "depth": 14.5}, "geometry": {"type": "Polygon", "coordinates": [[[83.28, 17.7], [83.285, 17.7], [83.285, 17.705], [83.28, 17.705], [83.28, 17.7]]]}}]}
