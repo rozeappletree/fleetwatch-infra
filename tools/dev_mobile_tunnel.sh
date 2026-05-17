@@ -114,6 +114,15 @@ case "$TUNNEL_MODE" in
   *) fail "Invalid TUNNEL_MODE=$TUNNEL_MODE. Use auto, ngrok, or lan." ;;
 esac
 
+log "Checking for frontend repository..."
+if [ ! -d "$ROOT_DIR/frontend" ]; then
+  log "Frontend directory not found. Cloning from rozeappletree/fleetwatch-admin..."
+  git clone https://github.com/rozeappletree/fleetwatch-admin.git "$ROOT_DIR/frontend"
+else
+  log "Frontend directory found. Pulling latest changes..."
+  (cd "$ROOT_DIR/frontend" && git pull origin main || true)
+fi
+
 if [ "$TUNNEL_MODE" = "ngrok" ]; then
   require_cmd "$NGROK_BIN"
 fi
