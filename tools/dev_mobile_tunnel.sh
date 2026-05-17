@@ -123,6 +123,15 @@ else
   (cd "$ROOT_DIR/frontend" && git pull origin main || true)
 fi
 
+log "Checking for driver app repository..."
+if [ ! -d "$DRIVER_APP_DIR" ]; then
+  log "Driver app directory not found. Cloning from rozeappletree/fleetwatch-mobile..."
+  git clone https://github.com/rozeappletree/fleetwatch-mobile.git "$DRIVER_APP_DIR"
+else
+  log "Driver app directory found. Pulling latest changes..."
+  (cd "$DRIVER_APP_DIR" && git pull origin main || true)
+fi
+
 if [ "$TUNNEL_MODE" = "ngrok" ]; then
   require_cmd "$NGROK_BIN"
 fi
