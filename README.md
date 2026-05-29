@@ -8,7 +8,7 @@ The architecture is designed for high-throughput vehicle telemetry, processing M
 
 The infrastructure consists of several microservices orchestrated via Docker Compose:
 
-1. **MQTT Broker (Mosquitto)**: Handles high-frequency, low-latency telemetry pings from the driver mobile app or simulation pipelines.
+1. **MQTT Broker (EMQX)**: Handles high-frequency, low-latency telemetry pings from the driver mobile app or simulation pipelines.
 2. **Redis**: Acts as the real-time cache layer for active vehicle coordinates, trips, and state management.
 3. **PostGIS (PostgreSQL)**: The primary spatial database. Stores permanent geospatial infrastructure (ports, berths, highways, railways) and historical telemetry data.
 4. **Golang Backend (`hslservices`)**: 
@@ -26,7 +26,7 @@ The infrastructure consists of several microservices orchestrated via Docker Com
 ├── envs/                # Environment variable templates
 ├── hslservices/         # Golang API and MQTT Worker services
 ├── mock_geojson/        # Scripts for generating mock telemetry and port boundaries
-├── mosquitto/           # MQTT broker configuration
+├── emqx/                # MQTT broker configuration
 ├── postgis/             # SQL schema definitions and init scripts for PostGIS
 ├── redis/               # Redis configuration
 └── tilegen/             # Python-based tile generation and map serving utilities
@@ -50,6 +50,9 @@ docker compose up -d
 
 # Check the logs of the Go API to ensure it's connected
 docker compose logs -f locations_api
+
+# Open the EMQX dashboard in local development
+# http://localhost:18083
 ```
 
 ### Database Initialization
@@ -63,7 +66,11 @@ The PostGIS database initializes automatically using the SQL files found in `/po
 You can inject mock telemetry data into the MQTT broker to test the data pipeline without running the driver app:
 
 ```bash
-docker exec -it fleetwatch-mosquitto mosquitto_pub -t "telemetry/vehicles" -m '{"vehicle_id": "truck_01", "lat": 17.7416, "lng": 83.3559}'
+docker exec -it fleetwatch-emqx emqx_ctl pub -t "trucks/truck_01" -m '{"vehicle_id": "truck_01", "lat": 17.7416, "lng": 83.3559}'
+
+# Or use any external MQTT client against localhost:1883.
+# Example:
+mosquitto_pub -h localhost -p 1883 -t "trucks/truck_01" -m '{"vehicle_id": "truck_01", "lat": 17.7416, "lng": 83.3559}'
 ```
 
 ## License
