@@ -48,13 +48,17 @@ func (mb *MsgBroker) messageHandler(client mqtt.Client, msg mqtt.Message) {
 
 // connectHandler is called once the MQTT client establishes a session.
 // Subscriptions are re-applied here so they survive broker restarts.
-func connectHandler(client mqtt.Client) {
-	go func(topic string) {
-		token := client.Subscribe(topic, 1, nil)
+func connectHandler(handler mqtt.MessageHandler) mqtt.OnConnectHandler {
+	return func(client mqtt.Client) {
+		token := client.Subscribe(mqttTopic, 1, handler)
 		token.Wait()
-	}(mqttTopic)
+		if token.Error() != nil {
+			log.WithError(token.Error()).Error("MQTT subscription failed")
+			return
+		}
 
-	log.WithField("Topic", mqttTopic).Info("Subscribed to broker topic")
+		log.WithField("Topic", mqttTopic).Info("Subscribed to broker topic")
+	}
 }
 
 // connectionLostHandler logs unexpected disconnections.
@@ -75,10 +79,11 @@ func InitMQTTClient(StgC *MsgBroker) *mqtt.Client {
 	)
 
 	opts.SetClientID("fleet-go-worker")
+	opts.SetCleanSession(true)
 	opts.SetOrderMatters(false)
 	opts.SetAutoReconnect(true)
 	opts.SetDefaultPublishHandler(StgC.messageHandler)
-	opts.SetOnConnectHandler(connectHandler)
+	opts.SetOnConnectHandler(connectHandler(StgC.messageHandler))
 	opts.SetConnectionLostHandler(connectionLostHandler)
 
 	client := mqtt.NewClient(opts)

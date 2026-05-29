@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
 
   # EMQX MQTT Broker
@@ -20,7 +18,7 @@ services:
       EMQX_HOST: localhost
       EMQX_LOG__CONSOLE__LEVEL: warning
     healthcheck:
-      test: ["CMD", "emqx", "ping"]
+      test: ["CMD-SHELL", "timeout 3 bash -c '</dev/tcp/127.0.0.1/1883'"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -74,9 +72,12 @@ services:
       context: ./hslservices/
       dockerfile: ./cmd/mqtt/Dockerfile
     depends_on:
-      - emqx
-      - redis
-      - postgis
+      emqx:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      postgis:
+        condition: service_started
     environment:
       MQTT_BROKER: emqx
       MQTT_PORT:   "1883"
@@ -113,7 +114,8 @@ services:
   # ── Fleet Dashboard — nginx serving React Leaflet app ────────────────────
   frontend:
     image: fleet_dashboard
-    build: ./frontend/
+    build:
+      context: ../fleetwatch-admin
     depends_on:
       - redis
       - mqtt
