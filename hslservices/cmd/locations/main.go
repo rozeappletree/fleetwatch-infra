@@ -65,6 +65,29 @@ func healthCheck(w http.ResponseWriter, r *http.Request) {
 	)
 }
 
+func rootHandler(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"service": "FleetWatch Locations API",
+		"status":  "ok",
+		"endpoints": []string{
+			"/health/",
+			"/locations/",
+			"/histlocations/",
+			"/api/berths/",
+			"/api/yards/",
+			"/api/corridors/",
+			"/api/gates/",
+			"/api/trips/assign",
+		},
+	})
+}
+
 // httpConnectionUpgrade - To Initialize a Websocket Connection need an upgrade
 // function to hijack the original HTTP call, in this case, it's just adding the
 // connection to LocationsAPIHandler list of registered connections
@@ -291,6 +314,8 @@ func init() {
 func main() {
 
 	router := mux.NewRouter().StrictSlash(true)
+
+	router.HandleFunc("/", rootHandler)
 
 	// Healthcheck the API...
 	router.HandleFunc("/health/", healthCheck)
