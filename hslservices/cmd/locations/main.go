@@ -12,11 +12,11 @@ import (
 	"sync"
 	"syscall"
 
-	hsl "github.com/dmw2151/hsldatabridge"
-	"github.com/go-redis/redis/v8"
+	fleet "github.com/dmw2151/fleetbridge"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/mmcloughlin/geohash"
+	"github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/semaphore"
 )
@@ -26,7 +26,7 @@ var (
 
 	// NOTE: Replace this with a Real Number of N Max Connections (currently static @ 100)
 	apiHandler = LocationsAPIHandler{
-		client:      hsl.InitRedisClient(ctx),
+		client:      fleet.InitRedisClient(ctx),
 		conns:       make([]*upgradedLocationListener, 100),
 		sem:         semaphore.NewWeighted(100),
 		mu:          sync.Mutex{},
@@ -61,7 +61,7 @@ type upgradedLocationListener struct {
 // Healthcheck - Nothing More...
 func healthCheck(w http.ResponseWriter, r *http.Request) {
 	w.Write(
-		[]byte("Good Morning, Helsinki!"),
+		[]byte("Fleet Tracker India — OK"),
 	)
 }
 
@@ -124,13 +124,14 @@ func (ull *upgradedLocationListener) recv(idx int, callbackCh chan int) error {
 // along to that connection as well
 func (lh *LocationsAPIHandler) subscriptionFanout() {
 
+	// go-redis v9 uses context.Background() — client.Context() was removed in v9
 	sub := lh.client.Subscribe(
-		lh.client.Context(), "currentLocationsPS",
+		ctx, "currentLocationsPS",
 	)
 
 	defer func() {
 		log.Info("Exit from PUB/SUB Channel")
-		sub.Unsubscribe(lh.client.Context(), "currentLocationsPS")
+		sub.Unsubscribe(ctx, "currentLocationsPS")
 	}()
 
 	// Open Redis PUB/SUB Channel...
@@ -189,20 +190,24 @@ func (lh *LocationsAPIHandler) livelocationsHandler(w http.ResponseWriter, r *ht
 
 func (lh *LocationsAPIHandler) historicallocationsHandler(w http.ResponseWriter, r *http.Request) {
 
-	var e = &hsl.Event{}
-	// Take the Incoming Request; Parse into an event...
-	err := json.NewDecoder(r.Body).Decode(&e)
-
+	// Decode trip query from body: expects {"vid":"...", "tid":"..."}
+	var req struct {
+		VehicleID string `json:"vid"`
+		TripID    string `json:"tid"`
+	}
+	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	journeyID := e.GetEventHash()
+	// Reconstruct the tripKey the same way main.go does
+	tmpEvent := fleet.TruckEvent{VehicleID: req.VehicleID, TripID: req.TripID}
+	tripKey := tmpEvent.GetEventHash()
 
-	// TS.MRANGE uses a 5x nested structure for anything, wooof
+	// TS.MRANGE — pull all aggregated series for this trip
 	result, err := lh.client.Do(
-		lh.client.Context(), "TS.MRANGE", "-", "+", "FILTER", fmt.Sprintf("journey=%s", journeyID),
+		ctx, "TS.MRANGE", "-", "+", "FILTER", fmt.Sprintf("trip=%s", tripKey),
 	).Result()
 
 	if err != nil {
@@ -213,11 +218,8 @@ func (lh *LocationsAPIHandler) historicallocationsHandler(w http.ResponseWriter,
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Connection", "keep-alive")
 
-	// What a Monstrosity; to make this efficient; need to know
-	// length of array first, or limit to N spaces...e.g. last 240 positions == 60 min...
-
 	var (
-		respArr = make([]hsl.Event, 240)
+		respArr = make([]fleet.TruckEvent, 240)
 		realLen int
 	)
 
@@ -232,17 +234,16 @@ func (lh *LocationsAPIHandler) historicallocationsHandler(w http.ResponseWriter,
 			for i, tup := range positionsArr {
 				ts, gh := tup.([]interface{})[0].(int64), tup.([]interface{})[1].(string)
 				ghI, err := strconv.ParseFloat(gh, 64)
-
 				if err != nil {
 					log.Error(err)
 				}
-
 				lat, lng := geohash.DecodeIntWithPrecision(uint64(ghI), 64)
-
-				respArr[i] = hsl.Event{
+				respArr[i] = fleet.TruckEvent{
 					Lat:       lat,
 					Lng:       lng,
 					Timestamp: ts,
+					VehicleID: req.VehicleID,
+					TripID:    req.TripID,
 				}
 			}
 		}
@@ -251,14 +252,10 @@ func (lh *LocationsAPIHandler) historicallocationsHandler(w http.ResponseWriter,
 			for i, tup := range positionsArr {
 				spd := tup.([]interface{})[1].(string)
 				spdf, err := strconv.ParseFloat(spd, 32)
-
 				if err != nil {
 					log.Error(err)
 				}
-
-				var s32 = float32(spdf)
-				respArr[i].Spd = s32
-
+				respArr[i].Speed = float32(spdf)
 			}
 		}
 	}
@@ -269,6 +266,9 @@ func (lh *LocationsAPIHandler) historicallocationsHandler(w http.ResponseWriter,
 
 func init() {
 
+	// Wire os.Getenv into the trips.go helper so it can read PG_DSN.
+	osGetenv = os.Getenv
+
 	// Set Logging Config
 	log.SetOutput(os.Stdout)
 	log.SetLevel(log.DebugLevel)
@@ -277,6 +277,9 @@ func init() {
 		DisableColors:   true,
 		TimestampFormat: "2006-01-02 15:04:05.0000",
 	})
+
+	// Initialise the Port Map PostGIS connection.
+	initPortDB()
 
 	// Initialize the LocationsAPI Handler & Have It Subscribe
 	// to Target Topics
@@ -297,6 +300,13 @@ func main() {
 
 	// Historical Locations Endpoint...
 	router.HandleFunc("/histlocations/", apiHandler.historicallocationsHandler)
+
+	// GEO Endpoints — live fleet spatial queries
+	router.HandleFunc("/fleet/current/", apiHandler.currentFleetHandler)
+	router.HandleFunc("/fleet/nearby/", apiHandler.nearbyFleetHandler)
+
+	// Port Map Endpoints (berths, yards, corridors, gates, trip assignment)
+	RegisterPortMapRoutes(router)
 
 	log.Fatal(
 		http.ListenAndServe(":2152", router),

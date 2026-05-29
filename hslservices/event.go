@@ -1,55 +1,61 @@
-package hsldatabridge
+package fleetbridge
 
 import (
 	"crypto/md5"
 	"fmt"
 	"io"
+
 	log "github.com/sirupsen/logrus"
 )
 
-// Event - The Event body contains a single key that indicates event type, rather
-// than designating a custom struct for each event, only store the relevent keys
-// from any type. Refer to documentation at the below URL for full description
-// of the response body.
-// Docs: https://digitransit.fi/en/developers/apis/4-realtime-api/vehicle-positions/#event-types
-type Event struct {
-	JrnID           int     `json:"jrn"`   // Internal journey descriptor, not meant to be useful for external use.
-	ODay            string  `json:"oday"`  // Operating day of the trip. The exact time when an operating day ends depends on the route.
-	Direction       string  `json:"dir"`   // Route direction of the trip
-	VehID           int     `json:"veh"`   // Vehicle number that can be seen painted on the side of the vehicle - Can be String OR Int
-	Timestamp       int64   `json:"tsi"`   // UTC timestamp with millisecond precision from the vehicle in UnixTime
-	Lat             float64 `json:"lat"`   // WGS 84 latitude in degrees.
-	Lng             float64 `json:"long"`  // WGS 84 longitude in degrees.
-	Heading         int     `json:"hdg"`   // Heading of the vehicle, in degrees (⁰) starting clockwise from geographic north.
-	Start           string  `json:"start"` // Scheduled start time of the trip, i.e. the scheduled departure time from the first stop of the trip.
-	DeltaToSchedule float32 `json:"dl"`    // Offset from the scheduled timetable in seconds (s).
-	Spd             float32 `json:"spd"`   // Speed of the vehicle, in meters per second (m/s).
-	Acc             float32 `json:"acc"`   // Acceleration (m/s^2), calculated from the speed on this and the previous message
-	RouteID         string  `json:"route"` // ID of the route the vehicle is currently running on. Matches route_id in the topic.
-	Stop            int     `json:"stop"`
-	Occupancy       int     `json:"occu"` // Integer describing passenger occupancy level of the vehicle on [0, 100]
-}
-
-// GetEventHash  -
-func (e *Event) GetEventHash() string {
-
-	// Create a Hash of the Object's key Identifying Features
-	h := md5.New()
-	io.WriteString(h, fmt.Sprintf("%d:%s:%s", e.JrnID, e.RouteID, e.ODay))
-	journeyID := fmt.Sprintf("%x", h.Sum(nil))
-
-	log.Infof("%d:%s:%s", e.JrnID, e.RouteID, e.ODay)
-	log.Infof(journeyID)
-
-	return journeyID
-
-}
-
-// EventHolder is a struct used to capture the top-level of the MQTT
-// message (MsgType) without extracting to rawJSON && reflecting.
+// TruckEvent represents a single GPS telemetry payload published by a driver's
+// Flutter app. Field names use compact JSON keys to minimize bytes over 2G/3G
+// networks (e.g. "vid" instead of "vehicle_id").
 //
-// 4/24/2021: This struct is a placeholder for a struct
-// containing all possible message types, VP is the most commmon....
+// Payload example:
+//
+//	{
+//	  "vid": "AP 30 Y 1828",   // vehicle registration
+//	  "did": "9505683966",      // driver phone / ID
+//	  "tid": "uuid-trip-id",   // trip UUID (new per trip)
+//	  "lat": 17.7137197,
+//	  "lng": 83.1691558,
+//	  "spd": 0.30,              // km/h (rounded to 2dp)
+//	  "brg": 0.0,               // bearing degrees from north
+//	  "acc": 5.10,              // GPS accuracy radius in metres
+//	  "ts":  1778132507,        // Unix epoch seconds (UTC)
+//	  "bat": 82,                // battery %
+//	  "src": "mobile"           // source tag
+//	}
+type TruckEvent struct {
+	VehicleID string  `json:"vid"` // Registration plate, e.g. "AP 30 Y 1828"
+	DriverID  string  `json:"did"` // Driver phone / employee ID
+	TripID    string  `json:"tid"` // UUID for this trip session
+	Lat       float64 `json:"lat"` // WGS84 latitude
+	Lng       float64 `json:"lng"` // WGS84 longitude
+	Speed     float32 `json:"spd"` // Speed in km/h (rounded to 2dp)
+	Bearing   float32 `json:"brg"` // Heading degrees clockwise from north
+	Accuracy  float32 `json:"acc"` // GPS fix accuracy in metres
+	Timestamp int64   `json:"ts"`  // Unix epoch seconds (UTC)
+	Battery   int     `json:"bat"` // Device battery level 0–100
+	Source    string  `json:"src"` // "mobile" | "obd" | "sim"
+}
+
+// GetEventHash returns an MD5 hex string that uniquely identifies a trip
+// session, derived from VehicleID + TripID. Used as the Redis key prefix for
+// time-series data so each trip gets its own series.
+func (e *TruckEvent) GetEventHash() string {
+	h := md5.New()
+	io.WriteString(h, fmt.Sprintf("%s:%s", e.VehicleID, e.TripID))
+	tripKey := fmt.Sprintf("%x", h.Sum(nil))
+
+	log.Debugf("trip_key vehicle=%s trip=%s hash=%s", e.VehicleID, e.TripID, tripKey)
+	return tripKey
+}
+
+// EventHolder is the top-level wrapper that the Go worker unmarshals each
+// raw MQTT payload into. The Flutter app publishes TruckEvent JSON directly
+// (no wrapper envelope), so the holder simply embeds TruckEvent.
 type EventHolder struct {
-	VP Event `json:"VP"`
+	VP TruckEvent `json:"VP"`
 }

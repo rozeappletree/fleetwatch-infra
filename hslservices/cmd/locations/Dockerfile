@@ -1,26 +1,26 @@
+# syntax=docker/dockerfile:1.7
+# ── Stage 1: Build ────────────────────────────────────────────────────────────
+FROM golang:1.22-alpine AS builder
 
-ARG BUILDPATH='/build/hsl/cmd'
+WORKDIR /build
 
-FROM golang:1.16-alpine as builder
+RUN apk add --no-cache git
 
-ARG BUILDPATH
-
-WORKDIR $BUILDPATH
-
-# Copy code in && fetch dependencies
-COPY . ./
+COPY go.mod go.sum ./
 RUN go mod download
 
-# Build the MQTT > Redis Connector (produces an image of ~1.02GB, 900GB of it from Go 1.16)
-RUN cd ./cmd/locations &&\
-    CGO_ENABLED=1 go build -o locations
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -ldflags="-s -w" -o /locations-api ./cmd/locations
 
-# Create final image -  Just Export Go Binary onto regular alpine w. mqtt -> ~10MB
-FROM alpine:latest
-    
-ARG BUILDPATH
-WORKDIR $BUILDPATH
+# ── Stage 2: Runtime ──────────────────────────────────────────────────────────
+FROM gcr.io/distroless/static-debian12:nonroot
 
-COPY --from=builder $BUILDPATH .
+LABEL org.opencontainers.image.title="Fleet Locations API"
+LABEL org.opencontainers.image.description="WebSocket fan-out + historical trip query API."
 
-CMD ["./cmd/locations/locations"]
+COPY --from=builder /locations-api /locations-api
+
+USER nonroot:nonroot
+EXPOSE 2152
+ENTRYPOINT ["/locations-api"]

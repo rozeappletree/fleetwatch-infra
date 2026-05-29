@@ -1,128 +1,119 @@
-package hsldatabridge
+package fleetbridge
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
-	"github.com/pquerna/ffjson/ffjson"
 
 	log "github.com/sirupsen/logrus"
 )
 
-// Testing...
+// Environment variables (set in envs/mqtt_connector.env or docker-compose):
+//
+//	MQTT_TOPIC   trucks/#                         ← subscribe all truck topics
+//	MQTT_BROKER  192.168.31.116  or  emqx         ← broker host
+//	MQTT_PORT    1883                              ← plain TCP (no TLS for internal)
 var (
-	mqttTopic      = os.Getenv("MQTT_TOPIC")  // "/hfp/v2/journey/+/+/#"
-	mqttBrokerHost = os.Getenv("MQTT_BROKER") // "mqtt.hsl.fi"
-	mqttPort       = os.Getenv("MQTT_PORT")   // "8883"
+	mqttTopic      = os.Getenv("MQTT_TOPIC")  // e.g. "trucks/#"
+	mqttBrokerHost = os.Getenv("MQTT_BROKER") // broker hostname or IP
+	mqttPort       = os.Getenv("MQTT_PORT")   // "1883"
 )
 
-// MsgBroker ...
-// https://medium.com/swlh/golang-tips-why-pointers-to-slices-are-useful-and-how-ignoring-them-can-lead-to-tricky-bugs-cac90f72e77b
+// MsgBroker is a simple fan-out staging channel.
+// All MQTT messages land here; a pool of Redis workers drain it.
 type MsgBroker struct {
 	StagingC chan []byte
 }
 
-// NewMsgBroker ...
+// NewMsgBroker creates a buffered MsgBroker with capacity n.
 func NewMsgBroker(n int) *MsgBroker {
 	return &MsgBroker{
 		StagingC: make(chan []byte, n),
 	}
 }
 
-// messageHandler implements mqtt.PublishHandler/mqtt.MessageHandler,function passes
-// all messages along to a single staging channel
-//
-// NOTE: mqtt.messageHandler must be safe for concurrent use by multiple goroutines;
-// and should not be blocking (or call blocking code).
-//
-// WARNING: For this application specifically, chose to sacrifice the delivered at least
-// once property for expediency, set very short 10ms timeout  so don't launch new goroutine
-// or block for each message...
+// messageHandler implements mqtt.MessageHandler.
+// It is invoked by the paho library on every received message and must be
+// goroutine-safe and non-blocking.
 func (mb *MsgBroker) messageHandler(client mqtt.Client, msg mqtt.Message) {
-
 	select {
-	case mb.StagingC <- msg.Payload(): // Push to staging Channel...
-		log.WithFields(log.Fields{
-			"Topic": msg.Topic(),
-		}).Debug("Msg Recv")
-
-	default: // Channel blocked && drop message..
-		log.WithFields(log.Fields{
-			"Topic": msg.Topic(),
-		}).Warn("Msg Recv Timeout")
+	case mb.StagingC <- msg.Payload():
+		log.WithField("Topic", msg.Topic()).Debug("Msg Recv")
+	default:
+		log.WithField("Topic", msg.Topic()).Warn("Staging channel full — msg dropped")
 	}
-
 }
 
-// connectHandler implements mqtt.OnConnectHandler, handler logs new connections
-// to MQTT
-func connectHandler(client mqtt.Client) {
-
-	// NOTE: For each topic, begin listening on a separate goroutine; set the
-	// subscriptions onn connection s.t if the client is disconnected, resumes
-	// previous subscriptions on reconnect...
-	go func(topic string) {
-		token := client.Subscribe(topic, 1, nil)
+// connectHandler is called once the MQTT client establishes a session.
+// Subscriptions are re-applied here so they survive broker restarts.
+func connectHandler(handler mqtt.MessageHandler) mqtt.OnConnectHandler {
+	return func(client mqtt.Client) {
+		token := client.Subscribe(mqttTopic, 1, handler)
 		token.Wait()
-	}(mqttTopic)
+		if token.Error() != nil {
+			log.WithError(token.Error()).Error("MQTT subscription failed")
+			return
+		}
 
-	log.WithFields(
-		log.Fields{"Topic": mqttTopic},
-	).Info("Subscribed to New Topic")
+		log.WithField("Topic", mqttTopic).Info("Subscribed to broker topic")
+	}
 }
 
-// connectLostHandler implements mqtt.ConnectionLostHandler
+// connectionLostHandler logs unexpected disconnections.
 func connectionLostHandler(client mqtt.Client, err error) {
-	log.Printf("Connect lost: %v", err)
+	log.Warnf("MQTT connection lost: %v — client will auto-reconnect", err)
 }
 
-// InitMQTTClient - Initializes the MQTT Client w. a fixed set of behavior
-// for onConnect, onRecv, and onDisconnect
+// InitMQTTClient creates and connects a paho MQTT client pointing at the
+// internal EMQX broker (plain TCP, not TLS — use TLS on port 8883 in
+// production via a reverse-proxy or stunnel).
 func InitMQTTClient(StgC *MsgBroker) *mqtt.Client {
-
-	// Initialize default options; instantiates a new *mqtt.ClientOptions
 	opts := mqtt.NewClientOptions()
 
-	// Add options to `mqtt.ClientOptions`, per suggestion in lib docs, use
-	// setters rather than setting values in opts directly
+	// Plain TCP — our own EMQX broker runs inside the Docker network / LAN.
+	// Switch to "mqtts://" and add TLS config for production deployments.
 	opts.AddBroker(
-		fmt.Sprintf("mqtts://%s:%s", mqttBrokerHost, mqttPort),
+		fmt.Sprintf("tcp://%s:%s", mqttBrokerHost, mqttPort),
 	)
 
+	opts.SetClientID("fleet-go-worker")
+	opts.SetCleanSession(true)
 	opts.SetOrderMatters(false)
+	opts.SetAutoReconnect(true)
 	opts.SetDefaultPublishHandler(StgC.messageHandler)
-	opts.SetOnConnectHandler(connectHandler)
+	opts.SetOnConnectHandler(connectHandler(StgC.messageHandler))
 	opts.SetConnectionLostHandler(connectionLostHandler)
 
-	// Create Client
 	client := mqtt.NewClient(opts)
 
 	log.WithFields(log.Fields{
-		"Broker(s)":     opts.Servers,
-		"Ordered":       opts.Order,
-		"Autoreconnect": opts.AutoReconnect,
-	}).Info("New MQTT Client Connection")
+		"Broker":        fmt.Sprintf("tcp://%s:%s", mqttBrokerHost, mqttPort),
+		"Topic":         mqttTopic,
+		"AutoReconnect": opts.AutoReconnect,
+	}).Info("Connecting to MQTT broker")
 
-	// Open new connection w. Client
 	if token := client.Connect(); token.Wait() && token.Error() != nil {
-		// Critical Error - Cannot Connect to MQTT, most likely the mqtt server is down....
 		log.Panic(token.Error())
 	}
 
 	return &client
 }
 
-// DeserializeMQTTBody ...
+// DeserializeMQTTBody unmarshals a raw MQTT payload JSON into an EventHolder.
+// The Flutter app publishes TruckEvent JSON directly (no wrapper), so we
+// unmarshal into the VP field directly via the EventHolder shim.
+//
+// Returns MQTTValidationError if lat/lng are zero (bad GPS fix or tunnel).
 func DeserializeMQTTBody(msgb []byte, hold *EventHolder) error {
-
-	// Dereference here...regret???
-	if err := ffjson.Unmarshal(msgb, &hold); err != nil {
+	// The Flutter app sends TruckEvent JSON directly — unmarshal into VP
+	if err := json.Unmarshal(msgb, &hold.VP); err != nil {
 		return err
 	}
 
-	if lat, lng := hold.VP.Lat, hold.VP.Lng; lat == 0.0 || lng == 0.0 {
-		return &MQTTValidationError{"Custom error; Missing coords"}
+	if hold.VP.Lat == 0.0 || hold.VP.Lng == 0.0 {
+		return &MQTTValidationError{"Missing or zero coordinates — discarding"}
 	}
 
 	return nil

@@ -1,246 +1,266 @@
 package main
 
+// =============================================================================
+// main.go  (updated — adds geofence engine startup + CheckEvent per event)
+// =============================================================================
+
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"net"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
-	hsl "github.com/dmw2151/hsldatabridge"
-	redis "github.com/go-redis/redis/v8"
+	fleet "github.com/dmw2151/fleetbridge"
+	_ "github.com/lib/pq"
 	"github.com/mmcloughlin/geohash"
+	redis "github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 )
 
 var (
-	msgBroker   = hsl.NewMsgBroker(1024)
+	msgBroker   = fleet.NewMsgBroker(1024)
 	ctx, cancel = context.WithCancel(context.Background())
-	_           = hsl.InitMQTTClient(msgBroker)
-	redisClient = hsl.InitRedisClient(ctx)
-	nWorkers    = 10 // Set Variable for System CPU cap...
+	_           = fleet.InitMQTTClient(msgBroker)
+	redisClient = fleet.InitRedisClient(ctx)
+	nWorkers    = 10
+
+	// geofence is initialised in main() after DB connection is ready.
+	// Workers call CheckEvent; nil check guards the pre-init window.
+	geofence *GeofenceEngine
 )
 
-// statJourneyID checks if a journeyID already exists in the set of previously
-// seen JourneyID; attempts to SADD. Returns True if journey exists....
-func statJourneyID(client *redis.Client, key string, journeyID string) bool {
+// openPostGIS opens a connection to the PostGIS database using environment
+// variables that match those injected by docker-compose (postgres.env).
+func openPostGIS() (*sql.DB, error) {
+	host := getenv("POSTGRES_HOST", "postgis")
+	port := getenv("POSTGRES_PORT", "5432")
+	user := getenv("POSTGRES_USER", "postgres")
+	pass := getenv("POSTGRES_PASSWORD", "pass")
+	dbname := getenv("POSTGRES_DB", "fleet")
 
-	resp, err := client.Do(
-		ctx, "SADD", key, journeyID,
-	).Result()
+	dsn := fmt.Sprintf(
+		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+		host, port, user, pass, dbname,
+	)
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		return nil, err
+	}
+	if err := db.PingContext(ctx); err != nil {
+		return nil, fmt.Errorf("ping postgis: %w", err)
+	}
+	return db, nil
+}
 
+func getenv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+// statTripID checks if a tripKey already has a time-series in Redis.
+// Returns true if it already exists (SADD returned 0 = element was present).
+func statTripID(client *redis.Client, key string, tripKey string) bool {
+	resp, err := client.Do(ctx, "SADD", key, tripKey).Result()
 	if err != nil {
 		return false
 	}
-
-	// If resp == 0; then already exists...
 	return resp.(int64) == 0
 }
 
-// createTimeSeriesPair - create a timeseries of events and maps it to
-// auto-update a secondary time series with a compaction rule...
-//
-// WARNING: by default this setup ONLY allows for mapping 1:1 src to target
-// event timeseries, should consider using something better to customize rules
-func createTimeSeriesPair(client *redis.Client, journeyID string, label string) {
-
-	// Initialize Creation Pipeline For a Statistic
+// createTimeSeriesPair creates a raw + aggregated time-series pair for one
+// telemetry metric (e.g. "speed" or "gh") keyed on tripKey.
+func createTimeSeriesPair(client *redis.Client, tripKey string, label string) {
 	pipe := client.TxPipeline()
 
-	// Create Parent && Child Series
+	pipe.Do(ctx, "TS.CREATE", fmt.Sprintf("positions:%s:%s", tripKey, label))
 	pipe.Do(
-		ctx, "TS.CREATE", fmt.Sprintf("positions:%s:%s", journeyID, label),
+		ctx, "TS.CREATE",
+		fmt.Sprintf("positions:%s:%s:agg", tripKey, label),
+		"RETENTION", 120*60*1000,
+		"LABELS", label, 1, "trip", tripKey,
 	)
 
-	pipe.Do(
-		ctx, "TS.CREATE", fmt.Sprintf("positions:%s:%s:agg", journeyID, label),
-		"RETENTION", 120*60*1000, "LABELS", label, 1, "journey", journeyID,
-	)
-
-	_, err := pipe.Exec(ctx)
-
-	if err != nil {
-		log.WithFields(
-			log.Fields{
-				"JourneyID":   journeyID,
-				"Series":      fmt.Sprintf("positions:%s:%s", journeyID, label),
-				"ChildSeries": fmt.Sprintf("positions:%s:%s:agg", journeyID, label),
-			},
-		).Warn("Create TimeSeries Root Series Failed: ", err)
+	if _, err := pipe.Exec(ctx); err != nil {
+		log.WithFields(log.Fields{
+			"TripKey": tripKey,
+			"Series":  fmt.Sprintf("positions:%s:%s", tripKey, label),
+		}).Warn("TS.CREATE failed (may already exist): ", err)
 	}
 
-	// Using a second pipe, create a rule, split into 2 stages to ensure parent && child
-	// series exist first....
 	pipe.Do(
 		ctx, "TS.CREATERULE",
-		fmt.Sprintf("positions:%s:%s", journeyID, label),
-		fmt.Sprintf("positions:%s:%s:agg", journeyID, label),
+		fmt.Sprintf("positions:%s:%s", tripKey, label),
+		fmt.Sprintf("positions:%s:%s:agg", tripKey, label),
 		"AGGREGATION", "LAST", 15000,
 	)
 
-	_, err = pipe.Exec(ctx)
-
-	if err != nil {
-		log.WithFields(
-			log.Fields{
-				"JourneyID":   journeyID,
-				"Series":      fmt.Sprintf("positions:%s:%s", journeyID, label),
-				"ChildSeries": fmt.Sprintf("positions:%s:%s:agg", journeyID, label),
-			},
-		).Warn("Create TimeSeries Pair Failed: ", err)
+	if _, err := pipe.Exec(ctx); err != nil {
+		log.WithFields(log.Fields{
+			"TripKey": tripKey,
+		}).Warn("TS.CREATERULE failed: ", err)
 	}
 }
 
-// Launch some workers here...
+// writeRedis drains the staging channel and writes each TruckEvent to Redis:
+//
+//  1. PUBLISH to "currentLocationsPS" (WebSocket dashboard fan-out)
+//  2. XADD to "events" stream (write-behind to PostGIS via RedisGears)
+//  3. TS.ADD speed and geohash time-series (60 s rolling)
+//  4. GEOADD fleet:live — spatial index for GEOSEARCH radius queries
+//  5. HSET truck:{vid} + EXPIRE 5 min — current state, liveness TTL
+//  6. GeofenceEngine.CheckEvent — four in-memory geofence checks
 func writeRedis(ctx context.Context, C <-chan []byte, client *redis.Client) {
-
 	for msg := range C {
 
-		// Receive the content of the MQTT message and de-serialize bytes into
-		// struct
-		e := &hsl.EventHolder{}
-		err := hsl.DeserializeMQTTBody(msg, e)
-
-		if err != nil {
+		e := &fleet.EventHolder{}
+		if err := fleet.DeserializeMQTTBody(msg, e); err != nil {
 			switch err := err.(type) {
-			case *hsl.MQTTValidationError:
-
-				// Most common error is Missing or Bad Coords; See defn for
-				// `hsl.MQTTValidationError` for more...
-				log.WithFields(log.Fields{"Body": e}).Debug("%+v", err)
-
+			case *fleet.MQTTValidationError:
+				log.WithField("body", string(msg)).Debug("Validation: ", err)
 			default:
-				// The entry was not deserializable into a known msg types
-				// Most often an error from the source feed, e.g the feed published
-				// a route as 123 instead of "123", fail to unmarshal string into Go
-				log.WithFields(log.Fields{"Body": e}).Debug("%+v", err)
+				log.WithField("body", string(msg)).Debug("Deserialize: ", err)
 			}
-
 			continue
 		}
 
-		// Main procedure for adding a series keys, values to the redis
-		// instance
-		// MEMOIZE!!
-		journeyID := e.VP.GetEventHash()
+		v := e.VP // shorthand for the TruckEvent
+		tripKey := v.GetEventHash()
 
-		// Check if JourneyID is known...
-		journeyExists := statJourneyID(client, "journeyID", journeyID)
+		// Ensure time-series exist for this trip (idempotent after first call)
+		if !statTripID(client, "tripKeys", tripKey) {
+			log.WithFields(log.Fields{
+				"Vehicle": v.VehicleID,
+				"Trip":    v.TripID,
+				"Key":     tripKey,
+			}).Info("New trip registered — creating time-series")
 
-		// if not...then create the timeseries pair for the journey...
-		if !(journeyExists) {
-
-			log.WithFields(
-				log.Fields{
-					"JourneyID": journeyID,
-				},
-			).Info("New Journey Registered")
-
-			createTimeSeriesPair(client, journeyID, "speed")
-			createTimeSeriesPair(client, journeyID, "gh")
+			createTimeSeriesPair(client, tripKey, "speed")
+			createTimeSeriesPair(client, tripKey, "gh")
 		}
 
-		// Write The incoming event to multiple locations using
-		// a single client Tx pipeline, cuts back on some network
-		// round-trip
 		pipe := client.TxPipeline()
 
-		// 1. Publish full body...
-		pipe.Publish(
-			ctx, "currentLocationsPS", msg,
-		)
+		// 1. Pub/Sub fan-out → WebSocket dashboard
+		pipe.Publish(ctx, "currentLocationsPS", msg)
 
-		// 2. XADD the full event body to a stream of events, these
-		// are swept up by a gears function and written behind to a DB
-		// every XXXXms
-		pipe.XAdd(
-			ctx, &redis.XAddArgs{
-				Stream: "events",
-				Values: []interface{}{
-					"rt", e.VP.RouteID,
-					"jid", journeyID,
-					"lat", e.VP.Lat,
-					"lng", e.VP.Lng,
-					"time", e.VP.Timestamp,
-					"spd", e.VP.Spd,
-					"acc", e.VP.Acc,
-					"dl", e.VP.DeltaToSchedule,
-				},
+		// 2. Stream → PostGIS write-behind (RedisGears)
+		pipe.XAdd(ctx, &redis.XAddArgs{
+			Stream: "events",
+			Values: []interface{}{
+				"vid", v.VehicleID,
+				"did", v.DriverID,
+				"tid", v.TripID,
+				"key", tripKey,
+				"lat", v.Lat,
+				"lng", v.Lng,
+				"spd", v.Speed,
+				"brg", v.Bearing,
+				"acc", v.Accuracy,
+				"ts", v.Timestamp,
+				"bat", v.Battery,
+				"src", v.Source,
 			},
-		)
+		})
 
-		// 3. TS.ADD a series of statistics to the timeseries created
-		// by `createTimeSeriesPair`
-		pipe.Do(
-			ctx,
-			"TS.ADD", fmt.Sprintf("positions:%s:speed", journeyID),
-			"*",
-			e.VP.Spd,
+		// 3. Time-series: speed (km/h) — 60 s rolling
+		pipe.Do(ctx,
+			"TS.ADD", fmt.Sprintf("positions:%s:speed", tripKey),
+			"*", v.Speed,
 			"RETENTION", 60*1000,
 			"CHUNK_SIZE", 16,
 			"ON_DUPLICATE", "LAST",
 		)
 
-		pipe.Do(
-			ctx,
-			"TS.ADD", fmt.Sprintf("positions:%s:gh", journeyID),
-			"*",
-			geohash.EncodeIntWithPrecision(e.VP.Lat, e.VP.Lng, 64),
+		// 3b. Time-series: geohash (int64) — 60 s rolling
+		pipe.Do(ctx,
+			"TS.ADD", fmt.Sprintf("positions:%s:gh", tripKey),
+			"*", geohash.EncodeIntWithPrecision(v.Lat, v.Lng, 64),
 			"RETENTION", 60*1000,
 			"ON_DUPLICATE", "LAST",
 		)
 
-		// Execute Pipe!
-		_, err = pipe.Exec(ctx)
+		// 4. GEO: spatial index — powers GEOSEARCH radius queries
+		pipe.GeoAdd(ctx, "fleet:live", &redis.GeoLocation{
+			Name:      v.VehicleID,
+			Longitude: v.Lng,
+			Latitude:  v.Lat,
+		})
 
-		// Failed to Write an Event
-		if err != nil {
+		// 5. Hash: current truck state with 5-min TTL
+		//    Expired hash = truck offline. GEOSEARCH filters offline trucks
+		//    by checking whether truck:{vid} still exists after the GEO lookup.
+		truckKey := fmt.Sprintf("truck:%s", v.VehicleID)
+		pipe.HSet(ctx, truckKey,
+			"lat", v.Lat,
+			"lng", v.Lng,
+			"spd", v.Speed,
+			"brg", v.Bearing,
+			"ts", v.Timestamp,
+			"bat", v.Battery,
+			"tid", v.TripID,
+			"did", v.DriverID,
+		)
+		pipe.Expire(ctx, truckKey, 5*time.Minute)
 
-			if err, ok := err.(net.Error); ok {
-				log.Errorf("Redis Down: %+v", err)
+		if _, err := pipe.Exec(ctx); err != nil {
+			if netErr, ok := err.(net.Error); ok {
+				log.Errorf("Redis network error: %+v", netErr)
 			}
-
-			log.WithFields(
-				log.Fields{
-					"Body": fmt.Sprintf("positions:%s:*", journeyID),
-				},
-			).Errorf("Failed to Write Event: %+v", err)
-
+			log.WithField("TripKey", tripKey).Errorf("Redis pipeline failed: %+v", err)
 		} else {
+			log.WithFields(log.Fields{
+				"Vehicle": v.VehicleID,
+				"Trip":    tripKey,
+				"Speed":   v.Speed,
+			}).Debug("Event written")
+		}
 
-			log.WithFields(
-				log.Fields{"Journey": journeyID},
-			).Debug("Wrote Event")
-
+		// 6. Geofence checks (in-memory, zero DB hits)
+		if geofence != nil {
+			geofence.CheckEvent(v.VehicleID, v.Lat, v.Lng, v.Speed, v.Timestamp)
 		}
 	}
 }
 
 func init() {
-	// Log as JSON instead of the default ASCII formatter.
-	log.SetFormatter(&log.TextFormatter{
-		FullTimestamp: true,
-	})
-
-	// Output to stdout instead of the default stderr
-	// Can be any io.Writer, see below for File example
+	log.SetFormatter(&log.TextFormatter{FullTimestamp: true})
 	log.SetOutput(os.Stdout)
-
-	// Only log the warning severity or above.
-	log.SetLevel(log.WarnLevel)
+	log.SetLevel(log.WarnLevel) // Change to InfoLevel for verbose output
 }
 
 func main() {
+	defer cancel()
 
-	quitChannel := make(chan os.Signal, 1)
-
-	// Start Staging Channel -> Redis Workers
+	// ── Drain staging channel with N concurrent Redis writers ─────────────────
+	// Start writers before geofence loading so telemetry ingestion is not
+	// blocked by spatial reference data startup.
 	for i := 0; i < nWorkers; i++ {
 		go writeRedis(ctx, msgBroker.StagingC, redisClient)
 	}
+	log.WithField("Workers", nWorkers).Info("Redis writer pool started")
 
+	// ── Connect to PostGIS and start geofence engine ──────────────────────────
+	db, err := openPostGIS()
+	if err != nil {
+		log.Warnf("geofence: PostGIS unavailable (%v) — geofence disabled", err)
+	} else {
+		gf, err := NewGeofenceEngine(ctx, db, redisClient)
+		if err != nil {
+			log.Warnf("geofence: engine init failed (%v) — geofence disabled", err)
+		} else {
+			geofence = gf
+			log.Info("geofence: engine started")
+		}
+	}
+
+	quitChannel := make(chan os.Signal, 1)
 	signal.Notify(quitChannel, syscall.SIGINT, syscall.SIGTERM)
 	<-quitChannel
-
+	log.Info("Fleet Go Worker — shutting down")
 }

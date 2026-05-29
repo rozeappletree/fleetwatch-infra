@@ -1,6 +1,7 @@
-package hsldatabridge
+package fleetbridge
 
-// MQTTValidationError -
+// MQTTValidationError is returned when an incoming MQTT payload passes JSON
+// parsing but fails semantic validation (e.g. zero lat/lng).
 type MQTTValidationError struct {
 	Message string
 }

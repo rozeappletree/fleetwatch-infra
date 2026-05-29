@@ -1,98 +1,97 @@
-version: '3'
+version: '3.8'
+
 services:
 
-  # Redis: dmw2151/redismods -> uses redislabs default container as base 
-  # See Image: https://hub.docker.com/r/redislabs/redismod
+  # ── EMQX MQTT Broker ──────────────────────────────────────────────────────
+  emqx:
+    image: emqx/emqx:5.6.1
+    container_name: fleetwatch-emqx
+    ports:
+      - "1883:1883"
+      - "8083:8083"
+      # Dev-only EMQX dashboard.
+      - "18083:18083"
+    volumes:
+      - ./emqx/emqx.conf:/opt/emqx/etc/emqx.conf:ro
+      - ./emqx/acl.conf:/opt/emqx/etc/acl.conf:ro
+      - emqx_data:/opt/emqx/data
+    environment:
+      EMQX_NAME: fleetwatch
+      EMQX_HOST: localhost
+      EMQX_LOG__CONSOLE__LEVEL: warning
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 3 bash -c '</dev/tcp/127.0.0.1/1883'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - fleet_net
+
+  # ── Redis Stack 7.4 ───────────────────────────────────────────────────────
   redis:
-    image: dmw2151/redismods 
+    image: redis/redis-stack-server:7.4.0-v3
     build: ./redis
     expose:
       - 6379
-    ports: 
+    ports:
       - "6379:6379"
     env_file:
-      - ./envs/postgres.env
+      - ./envs/redis.env
     volumes:
       - ./redis/:/redis/
-      - redis_data:/data/      
-    restart:
-      unless-stopped
+      - redis_data:/data/
+    restart: unless-stopped
+    networks:
+      - fleet_net
 
-  # Mqtt Connector: Runs a Golang service which receives from a MQTT stream
-  # and pushes to a redis instance
-  mqtt:
-    image: dmw2151/mqtt_connector
-    build:
-      context: ./hslservices/
-      dockerfile: ./cmd/mqtt/Dockerfile
-    depends_on:
-      - "redis"
-    env_file:
-      - ./envs/mqtt_connector.env
-      - ./envs/redis.env
-    restart:
-      unless-stopped
-
-  # Postgis: Used for Writebehind of Statistics/EventLog -> 
+  # ── PostGIS 16-3.5 ───────────────────────────────────────────────────────
   postgis:
-    image: mdillon/postgis  
+    image: postgis/postgis:16-3.5
     expose:
       - 5432
-    ports: 
+    ports:
       - "5433:5432"
     env_file:
       - ./envs/postgres.env
     volumes:
-      - postgres_data:/var/lib/postgresql/data/ # For persisting the database
-      - ./postgis/:/docker-entrypoint-initdb.d # For enabling scripts on init
+      - postgres_data:/var/lib/postgresql/data/
+      - ./postgis/:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - fleet_net
 
-  # Frontend: Notes....
-  frontend:
-    image: dmw2151/hslolfrontend
-    build: ./frontend/
-    depends_on:
-      - "redis"
-      - "mqtt"
-      - "tiles_api"
-      - "locations_api"
-    ports: 
-        - "8080:1234"
-    volumes:
-      - ./frontend/dist/:/hslolfrontend/dist
-    env_file: 
-      - './envs/hslweb.env'
-    restart:
-      unless-stopped
-
-  # Tile Generation Sidecar; Should sit near to PostGIS as possible
-  tilegen:
-    image: dmw2151/tilegen
-    build: ./tilegen/
-    depends_on:
-      - "postgis"
-    volumes:
-      - tiles:/tiles
-    env_file:
-      - ./envs/postgres.env
-    restart: 
-      unless-stopped
-
-  # Spatial API:
-  tiles_api:
-    image: dmw2151/tiles_api
+  # ── Fleet Go Worker (MQTT → Redis + Geofence) ─────────────────────────────
+  mqtt:
+    image: dmw2151/fleet_worker
     build:
       context: ./hslservices/
-      dockerfile: ./cmd/tiles/Dockerfile
-    expose:
-      - 2151
-    ports: 
-      - "2151:2151"
-    volumes:
-      - tiles:/tiles/:ro
+      dockerfile: ./cmd/mqtt/Dockerfile
+    depends_on:
+      emqx:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      postgis:
+        condition: service_started
+    environment:
+      MQTT_BROKER: emqx
+      MQTT_PORT:   "1883"
+      MQTT_TOPIC:  "trucks/#"
     env_file:
-      - ./envs/layers_api.env
+      - ./envs/redis.env
+      - ./envs/postgres.env
+    restart: unless-stopped
+    networks:
+      - fleet_net
 
-  # Locations API:
+  # ── Locations WebSocket API ───────────────────────────────────────────────
   locations_api:
     image: dmw2151/locations_api
     build:
@@ -100,14 +99,63 @@ services:
       dockerfile: ./cmd/locations/Dockerfile
     expose:
       - 2152
-    ports: 
+    ports:
       - "2152:2152"
     depends_on:
-      - "redis"
+      redis:
+        condition: service_started
+      postgis:
+        condition: service_healthy
+    environment:
+      PG_DSN: "host=postgis port=5432 dbname=postgres user=postgres password=postgres sslmode=disable"
     env_file:
       - ./envs/redis.env
+    networks:
+      - fleet_net
+
+  # ── Fleet Dashboard — nginx serving React Leaflet app ────────────────────
+  frontend:
+    image: fleet_dashboard
+    build: ./frontend/
+    depends_on:
+      - redis
+      - mqtt
+      - locations_api
+    ports:
+      - "8080:8080"
+    env_file:
+      - ./envs/hslweb.env
+    restart: unless-stopped
+    networks:
+      - fleet_net
+
+  # ── Martin vector tile server ─────────────────────────────────────────────
+  # Serves OSM layers from fleet.* schema as MVT tiles.
+  # Tiles at: http://localhost:3001/{fn_name}/{z}/{x}/{y}
+  # Catalog:  http://localhost:3001/catalog
+  # NOTE: Run port/scripts/load_maps.py and martin_functions.sql first
+  #       to populate fleet schema in the postgis container.
+  martin:
+    image: ghcr.io/maplibre/martin:latest
+    ports:
+      - "3001:3000"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgis:5432/postgres
+    command: ["--config", "/config/martin.yaml"]
+    volumes:
+      - ./martin/martin.yaml:/config/martin.yaml:ro
+    depends_on:
+      postgis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - fleet_net
 
 volumes:
   postgres_data:
   redis_data:
-  tiles:
+  emqx_data:
+
+networks:
+  fleet_net:
+    driver: bridge

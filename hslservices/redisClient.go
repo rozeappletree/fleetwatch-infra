@@ -1,4 +1,4 @@
-package hsldatabridge
+package fleetbridge
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"os"
 	"strconv"
 
-	redis "github.com/go-redis/redis/v8"
+	redis "github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -30,7 +30,7 @@ func InitRedisClient(ctx context.Context) *redis.Client {
 	if err != nil {
 		log.WithFields(log.Fields{
 			"RedisDB": redisDB,
-		}).Error("Invalid Redis DB (%s): %s", redisDB, err)
+		}).Errorf("Invalid Redis DB (%s): %s", redisDB, err)
 	}
 
 	client := redis.NewClient(&redis.Options{
@@ -46,7 +46,7 @@ func InitRedisClient(ctx context.Context) *redis.Client {
 	if err != nil {
 		log.WithFields(log.Fields{
 			"Addr": fmt.Sprintf("%s:%s", redisHost, redisPort),
-		}).Error("Invalid Redis DB (%s): %s", redisDB, err)
+		}).Errorf("Redis connection failed: %s", err)
 		log.Panicln(err)
 	}
 
