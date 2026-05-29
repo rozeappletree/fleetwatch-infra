@@ -18,7 +18,6 @@ services:
     environment:
       EMQX_NAME: fleetwatch
       EMQX_HOST: localhost
-      EMQX_ALLOW_ANONYMOUS: "true"
       EMQX_LOG__CONSOLE__LEVEL: warning
     healthcheck:
       test: ["CMD", "emqx", "ping"]
