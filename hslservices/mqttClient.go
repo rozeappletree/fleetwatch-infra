@@ -13,7 +13,7 @@ import (
 // Environment variables (set in envs/mqtt_connector.env or docker-compose):
 //
 //	MQTT_TOPIC   trucks/#                         ← subscribe all truck topics
-//	MQTT_BROKER  192.168.31.116  or  mosquitto    ← broker host
+//	MQTT_BROKER  192.168.31.116  or  emqx         ← broker host
 //	MQTT_PORT    1883                              ← plain TCP (no TLS for internal)
 var (
 	mqttTopic      = os.Getenv("MQTT_TOPIC")  // e.g. "trucks/#"
@@ -63,12 +63,12 @@ func connectionLostHandler(client mqtt.Client, err error) {
 }
 
 // InitMQTTClient creates and connects a paho MQTT client pointing at the
-// internal Mosquitto broker (plain TCP, not TLS — use TLS on port 8883 in
+// internal EMQX broker (plain TCP, not TLS — use TLS on port 8883 in
 // production via a reverse-proxy or stunnel).
 func InitMQTTClient(StgC *MsgBroker) *mqtt.Client {
 	opts := mqtt.NewClientOptions()
 
-	// Plain TCP — our own Mosquitto runs inside the Docker network / LAN.
+	// Plain TCP — our own EMQX broker runs inside the Docker network / LAN.
 	// Switch to "mqtts://" and add TLS config for production deployments.
 	opts.AddBroker(
 		fmt.Sprintf("tcp://%s:%s", mqttBrokerHost, mqttPort),
