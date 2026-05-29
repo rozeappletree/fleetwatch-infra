@@ -73,5 +73,27 @@ docker exec -it fleetwatch-emqx emqx_ctl pub -t "trucks/truck_01" -m '{"vehicle_
 mosquitto_pub -h localhost -p 1883 -t "trucks/truck_01" -m '{"vehicle_id": "truck_01", "lat": 17.7416, "lng": 83.3559}'
 ```
 
+## Working Stack Proof
+
+The stack was verified locally with Docker Compose after the EMQX migration and frontend path fix.
+
+| Surface | URL | Proof |
+| ------- | --- | ----- |
+| FleetWatch frontend | `http://localhost:8080` | React/Leaflet dashboard loads with live WebSocket status |
+| EMQX Prometheus metrics | `http://localhost:18083/api/v5/prometheus/stats` | EMQX exposes broker, session, subscriber, and VM metrics |
+| Locations API | `http://localhost:2152/` | API root returns service status and available routes |
+
+### Frontend Dashboard
+
+![FleetWatch frontend dashboard](docs/screenshots/frontend-dashboard.png)
+
+### EMQX Metrics
+
+![EMQX Prometheus metrics](docs/screenshots/emqx-metrics.png)
+
+### Locations API
+
+![Locations API root response](docs/screenshots/locations-api.png)
+
 ## License
 MIT License
