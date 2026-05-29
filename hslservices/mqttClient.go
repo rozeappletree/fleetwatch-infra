@@ -13,7 +13,7 @@ import (
 // Environment variables (set in envs/mqtt_connector.env or docker-compose):
 //
 //	MQTT_TOPIC   trucks/#                         ← subscribe all truck topics
-//	MQTT_BROKER  192.168.31.116  or  mosquitto    ← broker host
+//	MQTT_BROKER  192.168.31.116  or  emqx         ← broker host
 //	MQTT_PORT    1883                              ← plain TCP (no TLS for internal)
 var (
 	mqttTopic      = os.Getenv("MQTT_TOPIC")  // e.g. "trucks/#"
@@ -48,13 +48,17 @@ func (mb *MsgBroker) messageHandler(client mqtt.Client, msg mqtt.Message) {
 
 // connectHandler is called once the MQTT client establishes a session.
 // Subscriptions are re-applied here so they survive broker restarts.
-func connectHandler(client mqtt.Client) {
-	go func(topic string) {
-		token := client.Subscribe(topic, 1, nil)
+func connectHandler(handler mqtt.MessageHandler) mqtt.OnConnectHandler {
+	return func(client mqtt.Client) {
+		token := client.Subscribe(mqttTopic, 1, handler)
 		token.Wait()
-	}(mqttTopic)
+		if token.Error() != nil {
+			log.WithError(token.Error()).Error("MQTT subscription failed")
+			return
+		}
 
-	log.WithField("Topic", mqttTopic).Info("Subscribed to broker topic")
+		log.WithField("Topic", mqttTopic).Info("Subscribed to broker topic")
+	}
 }
 
 // connectionLostHandler logs unexpected disconnections.
@@ -63,22 +67,23 @@ func connectionLostHandler(client mqtt.Client, err error) {
 }
 
 // InitMQTTClient creates and connects a paho MQTT client pointing at the
-// internal Mosquitto broker (plain TCP, not TLS — use TLS on port 8883 in
+// internal EMQX broker (plain TCP, not TLS — use TLS on port 8883 in
 // production via a reverse-proxy or stunnel).
 func InitMQTTClient(StgC *MsgBroker) *mqtt.Client {
 	opts := mqtt.NewClientOptions()
 
-	// Plain TCP — our own Mosquitto runs inside the Docker network / LAN.
+	// Plain TCP — our own EMQX broker runs inside the Docker network / LAN.
 	// Switch to "mqtts://" and add TLS config for production deployments.
 	opts.AddBroker(
 		fmt.Sprintf("tcp://%s:%s", mqttBrokerHost, mqttPort),
 	)
 
 	opts.SetClientID("fleet-go-worker")
+	opts.SetCleanSession(true)
 	opts.SetOrderMatters(false)
 	opts.SetAutoReconnect(true)
 	opts.SetDefaultPublishHandler(StgC.messageHandler)
-	opts.SetOnConnectHandler(connectHandler)
+	opts.SetOnConnectHandler(connectHandler(StgC.messageHandler))
 	opts.SetConnectionLostHandler(connectionLostHandler)
 
 	client := mqtt.NewClient(opts)

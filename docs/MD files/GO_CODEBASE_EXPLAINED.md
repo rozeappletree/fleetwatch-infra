@@ -18,7 +18,7 @@ This package contains the shared logic, data structures, and client initializati
 
 ### 2. `mqttClient.go`
 
-- **Purpose:** Manages the connection to the Mosquitto broker.
+- **Purpose:** Manages the connection to the EMQX broker.
 - **Key Logic:**
   - `MsgBroker`: Implements a "Staging Channel" (buffered Go channel). This acts as a high-speed intake valve.
   - `messageHandler`: A non-blocking function that takes messages from the network and pushes them into the staging channel.

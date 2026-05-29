@@ -211,6 +211,13 @@ func init() {
 func main() {
 	defer cancel()
 
+	// Start Redis writers before optional geofence loading so telemetry ingestion
+	// is not blocked by spatial reference data startup.
+	for i := 0; i < nWorkers; i++ {
+		go writeRedis(ctx, msgBroker.StagingC, redisClient)
+	}
+	log.WithField("Workers", nWorkers).Info("Redis writer pool started")
+
 	// ── Connect to PostGIS and start geofence engine ──────────────────────────
 	db, err := openPostGIS()
 	if err != nil {
@@ -223,11 +230,6 @@ func main() {
 			geofence = gf
 			log.Info("geofence: engine started")
 		}
-	}
-
-	// ── Drain staging channel with N concurrent Redis writers ─────────────────
-	for i := 0; i < nWorkers; i++ {
-		go writeRedis(ctx, msgBroker.StagingC, redisClient)
 	}
 
 	quitChannel := make(chan os.Signal, 1)

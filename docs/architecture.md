@@ -29,7 +29,7 @@ flowchart TB
     end
 
     subgraph Messaging
-        MQTT["Mosquitto MQTT\n(tcp://1883)"]
+        MQTT["EMQX MQTT\n(tcp://1883)"]
     end
 
     %% Backend Services
@@ -74,7 +74,7 @@ flowchart TB
 
 1. **Ingestion Layer:**
    - **Flutter App:** Streams location data.
-   - **Mosquitto MQTT:** High-throughput message broker handling telemetry streams.
+   - **EMQX MQTT:** High-throughput message broker handling telemetry streams.
 
 2. **Backend Processing:**
    - **Go Worker:** Subscribes to MQTT topics, parses telemetry, and maintains the current state of the fleet.

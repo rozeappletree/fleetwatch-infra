@@ -1,7 +1,124 @@
-/tilegen/tiles/**
-/frontend/.cache/
-/frontend/node_modules/
-/frontend/dist/
-/deploy/**
-/driver_app/
+# FleetWatch / Docker / Go / Node / Python / Flutter
 
+# OS metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor and IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*.swn
+*~
+
+# Logs and diagnostics
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+coverage/
+.nyc_output/
+
+# Environment and local secrets
+.env
+.env.*
+!.env.example
+!.env.sample
+*.local
+*.secret
+*.key
+*.pem
+*.crt
+*.p12
+*.pfx
+
+# Docker and generated runtime data
+deploy/
+docker-data/
+docker-volumes/
+*.pid
+
+# EMQX runtime data if a local bind mount is ever used
+emqx/data/
+emqx/log/
+emqx/plugins/
+
+# Redis runtime data
+redis/dump.rdb
+redis/appendonlydir/
+redis/*.rdb
+redis/*.aof
+
+# Postgres/PostGIS local data and dumps
+postgis/data/
+postgres_data/
+*.dump
+*.sql.gz
+
+# Tile generation output
+tilegen/tiles/**
+tilegen/cache/
+tilegen/tmp/
+*.mbtiles
+
+# Go
+bin/
+dist/
+build/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+go.work.sum
+
+# Node / frontend artifacts
+node_modules/
+.cache/
+.parcel-cache/
+.vite/
+dist/
+build/
+coverage/
+frontend/.cache/
+frontend/node_modules/
+frontend/dist/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# Flutter / Dart local artifacts
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+pubspec.lock
+driver_app/
+
+# Generated mobile/build artifacts
+android/.gradle/
+android/local.properties
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+
+# Local generated repositories and scratch folders
+frontend/
+tmp/
+temp/

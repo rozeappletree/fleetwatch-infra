@@ -1,6 +1,6 @@
 {
     "app_name": "FleetTrack India — Real-Time Truck Tracking",
-    "description": "Production-grade Indian fleet & truck tracking platform. Driver Flutter app → Mosquitto MQTT → Go worker → Redis TimeSeries → PostGIS → OpenStreetMap dashboard.",
+    "description": "Production-grade Indian fleet & truck tracking platform. Driver Flutter app → EMQX MQTT → Go worker → Redis TimeSeries → PostGIS → OpenStreetMap dashboard.",
     "featured": true,
     "rank": 40,
     "type": "Full App",

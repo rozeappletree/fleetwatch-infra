@@ -5,7 +5,7 @@
 A **production-grade Indian fleet & truck tracking platform** built on a stream-processing backbone:
 
 ```
-Flutter Driver App → Mosquitto MQTT → Go Worker → Redis Stack → WebSocket → OpenStreetMap Dashboard
+Flutter Driver App → EMQX MQTT → Go Worker → Redis Stack → WebSocket → OpenStreetMap Dashboard
 ```
 
 GPS telemetry from driver phones is ingested via MQTT, fanned out live to a dashboard via Redis Pub/Sub, stored as time-series for trip history, and written behind to PostGIS for spatial analytics and map tile generation.
@@ -23,7 +23,7 @@ flowchart TD
     end
 
     subgraph Broker["MQTT Broker"]
-        MOSQ["Eclipse Mosquitto - port 1883 plain TCP"]
+        MOSQ["EMQX - port 1883 plain TCP"]
     end
 
     subgraph Ingest["Ingest Layer - Go 1.22"]
@@ -104,14 +104,14 @@ The Flutter app publishes JSON directly to `trucks/{vehicleID}` with compact key
 
 ## 4. Services Breakdown
 
-### 4.1 `mosquitto` — MQTT Broker · port **1883**
+### 4.1 `emqx` — MQTT Broker · port **1883**
 
-**Image:** `eclipse-mosquitto:2`  
-**Config:** `mosquitto/mosquitto.conf`
+**Image:** `emqx/emqx:5.6.1`  
+**Config:** `emqx/emqx.conf`
 
 - Plain TCP on `1883` for driver phones on the same LAN / Docker network.
-- Anonymous access enabled (testing). Production: add `password_file` + TLS on `8883`.
-- Persistence enabled at `/mosquitto/data/`.
+- Anonymous access enabled (testing). Production: add EMQX authentication + TLS on `8883`.
+- Persistence enabled at `/opt/emqx/data`.
 - Message size limit: 64 KB (truck events are ~200 bytes).
 
 ---
@@ -122,7 +122,7 @@ The Flutter app publishes JSON directly to `trucks/{vehicleID}` with compact key
 **Runtime:** `gcr.io/distroless/static-debian12:nonroot` (~3 MB)
 
 **Startup:**
-- Subscribes to `trucks/#` on `mosquitto:1883` via `paho.mqtt v1.5`.
+- Subscribes to `trucks/#` on `emqx:1883` via `paho.mqtt v1.5`.
 - Spawns **10 concurrent `writeRedis` goroutines**, each draining a shared buffered channel (size 1024).
 
 **Per-event logic in `writeRedis()`:**
@@ -288,7 +288,7 @@ india_districts         -- GADM 4.1 India district boundaries (ogr2ogr loaded)
 [Flutter App]
   GPS fix → SQLite buffer → MQTT QoS 1 → trucks/{vid}
                                               │
-                                       [Mosquitto :1883]
+                                       [EMQX :1883]
                                               │
                                     [Go MQTT Worker × 10]
                                               │
@@ -315,7 +315,7 @@ india_districts         -- GADM 4.1 India district boundaries (ogr2ogr loaded)
 
 | Env File | Used By | Key Variables |
 | -------- | ------- | ------------- |
-| `envs/mqtt_connector.env` | `mqtt` worker | `MQTT_TOPIC=trucks/#`, `MQTT_BROKER=mosquitto`, `MQTT_PORT=1883` |
+| `envs/mqtt_connector.env` | `mqtt` worker | `MQTT_TOPIC=trucks/#`, `MQTT_BROKER=emqx`, `MQTT_PORT=1883` |
 | `envs/redis.env` | `mqtt`, `locations_api` | `REDIS_HOST`, `REDIS_PORT=6379`, `REDIS_DB=0` |
 | `envs/postgres.env` | `postgis`, `redis`, `tilegen` | `POSTGRES_DB`, `POSTGRES_USER`, `PGPASSWORD` |
 | `envs/layers_api.env` | `tiles_api` | `TILE_DIRECTORY` |
@@ -327,10 +327,10 @@ india_districts         -- GADM 4.1 India district boundaries (ogr2ogr loaded)
 
 | Service | Image | Ports | Depends On |
 | ------- | ----- | ----- | ---------- |
-| `mosquitto` | `eclipse-mosquitto:2` | `1883`, `9001` | — |
+| `emqx` | `emqx/emqx:5.6.1` | `1883`, `8083`, `18083` | — |
 | `redis` | `redis/redis-stack-server:7.4.0-v3` | `6379` | — |
 | `postgis` | `postgis/postgis:16-3.5` | `5433→5432` | — |
-| `mqtt` | `fleet_worker` (distroless) | — | `mosquitto`, `redis` |
+| `mqtt` | `fleet_worker` (distroless) | — | `emqx`, `redis` |
 | `locations_api` | `locations_api` (distroless) | `2152` | `redis` |
 | `tiles_api` | `tiles_api` (distroless) | `2151` | — |
 | `tilegen` | `gdal:alpine + tippecanoe` | — | `postgis` |
@@ -378,7 +378,7 @@ india_districts         -- GADM 4.1 India district boundaries (ogr2ogr loaded)
 
 | Item | Status | Action |
 | ---- | ------ | ------ |
-| MQTT auth | ❌ Open | Add `password_file` to `mosquitto.conf`, one credential per vehicle |
+| MQTT auth | ❌ Open | Add EMQX authentication, one credential per vehicle |
 | MQTT TLS | ❌ HTTP only | Add listener on `8883` with Let's Encrypt cert |
 | WebSocket auth | ❌ Open | Add JWT verification in `livelocationsHandler` |
 | SOS topic | 🔧 Wired | `trucks/{vid}/sos` → `PUBLISH alerts:sos` → notify fleet manager |

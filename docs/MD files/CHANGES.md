@@ -12,7 +12,7 @@ Helsinki Regional Transit (HSL) codebase to the FleetTrack India production plat
 | Project name | Helsinki Regional Transit Tracking | FleetTrack India |
 | Go package name | `hsldatabridge` | `fleetbridge` |
 | Go module path | `github.com/dmw2151/hsldatabridge` | `github.com/dmw2151/fleetbridge` |
-| Data source | HSL public MQTT feed (`mqtt.hsl.fi:8883`) | Our own Mosquitto broker (internal LAN) |
+| Data source | HSL public MQTT feed (`mqtt.hsl.fi:8883`) | Our own EMQX broker (internal LAN) |
 | Map tiles | CARTO raster tiles (proprietary, API key) | OpenStreetMap via OpenLayers 8 (free, no key) |
 | Geofence data | Helsinki postal code shapefiles (HSL-specific) | GADM 4.1 India state & district boundaries |
 | Design doc | `Helsinki_Transit_System_Design.md` | `FleetTrack_India_System_Design.md` |
@@ -77,7 +77,7 @@ type TruckEvent struct {
 
 | | Old | New |
 |--|-----|-----|
-| Broker | `mqtt.hsl.fi:8883` (external, TLS) | `mosquitto:1883` (internal, plain TCP) |
+| Broker | `mqtt.hsl.fi:8883` (external, TLS) | `emqx:1883` (internal, plain TCP) |
 | Protocol | TLS with CA cert | Plain TCP |
 | Topic | `/hfp/v2/journey/+/vp/bus/#` | `trucks/#` |
 | Deserialisation | `ffjson` | `encoding/json` |
@@ -138,13 +138,13 @@ type TruckEvent struct {
 
 | Service | Image | Purpose |
 |---------|-------|---------|
-| `mosquitto` | `eclipse-mosquitto:2` | Our own MQTT broker — driver phones publish here |
+| `emqx` | `emqx/emqx:5.6.1` | Our own MQTT broker — driver phones publish here |
 
 ### 3.3 Dockerfile Changes (Go services)
 
 **Old pattern:**
 - Builder: `golang:1.16-alpine` with `CGO_ENABLED=1`
-- Runtime: `alpine:latest` with `mosquitto-libs` apk packages
+- Runtime: `alpine:latest` with MQTT client libraries
 - Build command: `cd ./cmd/mqtt && go build -o mqttconnector`
 
 **New pattern:**
@@ -158,7 +158,7 @@ type TruckEvent struct {
 
 | Change | Old | New |
 |--------|-----|-----|
-| Mosquitto config path | `./demo_server/mosquitto/mosquitto.conf` | `./mosquitto/mosquitto.conf` |
+| MQTT broker config path | legacy demo server config | `./emqx/emqx.conf` |
 | Frontend port mapping | `8080:1234` | `8080:8080` |
 | Frontend volume | `./frontend/dist/:/fleet_dashboard/dist` | **removed** (nginx serves static) |
 | Redis image | `dmw2151/redismods` | `redis/redis-stack-server:7.4.0-v3` |
@@ -220,7 +220,7 @@ type TruckEvent struct {
 
 | Variable | Old | New |
 |----------|-----|-----|
-| `MQTT_BROKER` | `mqtt.hsl.fi` | `mosquitto` |
+| `MQTT_BROKER` | `mqtt.hsl.fi` | `emqx` |
 | `MQTT_PORT` | `8883` (TLS) | `1883` (plain TCP) |
 | `MQTT_TOPIC` | `/hfp/v2/journey/+/vp/bus/#` | `trucks/#` |
 
@@ -230,7 +230,7 @@ type TruckEvent struct {
 
 | File | Purpose |
 |------|---------|
-| `mosquitto/mosquitto.conf` | Mosquitto broker config (promoted from `demo_server/`) |
+| `emqx/emqx.conf` | EMQX broker config |
 | `frontend/nginx.conf` | nginx reverse proxy config for WS + tile routes |
 | `docs/fleettrack_architecture.png` | Architecture diagram image |
 | `FleetTrack_India_System_Design.md` | Full system design doc (replaced old Helsinki doc) |

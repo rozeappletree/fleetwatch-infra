@@ -147,7 +147,7 @@ CONFIG_HOST="${CONFIG_HOST:-$(detect_lan_ip)}"
 CONFIG_URL="${CONFIG_URL:-http://$CONFIG_HOST:$FRONTEND_PORT/cdn/fleet-config.json}"
 
 log "Starting backend services"
-docker compose up -d mosquitto redis mqtt locations_api
+docker compose up -d emqx redis mqtt locations_api
 
 PUBLIC_MQTT_HOST="$CONFIG_HOST"
 PUBLIC_MQTT_PORT="$MQTT_PORT"

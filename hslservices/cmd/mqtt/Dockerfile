@@ -20,7 +20,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
 FROM gcr.io/distroless/static-debian12:nonroot
 
 LABEL org.opencontainers.image.title="Fleet Worker (MQTT → Redis)"
-LABEL org.opencontainers.image.description="Subscribes to Mosquitto, writes TruckEvent to Redis."
+LABEL org.opencontainers.image.description="Subscribes to EMQX, writes TruckEvent to Redis."
 
 COPY --from=builder /fleet-worker /fleet-worker
 
