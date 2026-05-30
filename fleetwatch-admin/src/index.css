@@ -1,0 +1,91 @@
+/* ── Reset & Tokens ─────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:       #0b1120;
+  --panel:    #111827;
+  --border:   #1f2d44;
+  --accent:   #f97316;
+  --accent2:  #22d3ee;
+  --green:    #1D9E75;
+  --red:      #E24B4A;
+  --amber:    #EF9F27;
+  --text:     #e2e8f0;
+  --muted:    #64748b;
+  --sidebar:  300px;
+  --font:     'Inter', system-ui, sans-serif;
+  --mono:     'JetBrains Mono', monospace;
+}
+
+html, body, #root {
+  height: 100%;
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+}
+
+/* scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+/* ── Leaflet overrides ──────────────────────────────────────────────────── */
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  background: #0b1120;
+}
+
+.leaflet-control-attribution {
+  background: rgba(11, 17, 32, 0.75) !important;
+  color: var(--muted) !important;
+  font-size: 0.6rem !important;
+}
+
+.leaflet-control-attribution a { color: var(--muted) !important; }
+
+.leaflet-bar a {
+  background: var(--panel) !important;
+  color: var(--text) !important;
+  border-color: var(--border) !important;
+}
+
+.leaflet-bar a:hover {
+  background: var(--border) !important;
+  color: var(--accent) !important;
+}
+
+.leaflet-popup-content-wrapper {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+
+.leaflet-popup-tip { background: var(--panel); }
+
+.leaflet-popup-content {
+  margin: 10px 14px;
+  font-family: var(--font);
+  font-size: 0.82rem;
+}
+
+/* Layer control panel */
+.leaflet-control-layers {
+  background: var(--panel) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 8px !important;
+  color: var(--text) !important;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4) !important;
+}
+
+.leaflet-control-layers-toggle {
+  background-color: var(--panel) !important;
+}
+
+.leaflet-control-layers label {
+  color: var(--text) !important;
+  font-size: 0.78rem;
+}
