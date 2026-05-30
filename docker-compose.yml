@@ -116,7 +116,7 @@ services:
   # ── Fleet Dashboard — nginx serving React Leaflet app ────────────────────
   frontend:
     image: fleet_dashboard
-    build: ./frontend/
+    build: ./cargo/frontend/
     depends_on:
       - redis
       - mqtt
