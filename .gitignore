@@ -1,0 +1,27 @@
+# ── Apps (developed separately, excluded from backend pushes) ─────────────────
+/cargo/frontend/
+/cargo/context/
+
+# ── Build artifacts ───────────────────────────────────────────────────────────
+/hslservices/mqtt
+/hslservices/locations
+/deploy/**
+
+# ── Data & routing (loaded manually, not committed) ──────────────────────────
+/data/
+/valhalla_data/
+
+# ── OSM ingestion pipeline (manual setup, lives in port/scripts/) ─────────────
+Dockerfile.ingestion
+/src/
+run_pipeline.py
+requirements.txt
+pyproject.toml
+
+# ── Dead stubs ────────────────────────────────────────────────────────────────
+/hslservices/cmd/writebehind/
+/tilegen/
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc

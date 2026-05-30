@@ -1,0 +1,15 @@
+# Martin tile server config — Helsinki fleet stack
+# Connects to the compose-internal PostGIS service on fleet_net
+# Tiles:  http://localhost:3001/{fn_name}/{z}/{x}/{y}
+# Catalog: http://localhost:3001/catalog
+# NOTE: Run port/scripts/load_maps.py and martin_functions.sql first
+
+listen_addresses: "0.0.0.0:3000"
+
+postgres:
+  - connection_string: ${DATABASE_URL}
+    auto_publish:
+      tables: false
+      functions:
+        from_schemas:
+          - public
