@@ -1,10 +1,12 @@
 /**
  * TrailLayer.jsx
- * Renders the historical trip trail for a selected truck.
+ * Renders the historical trip trail for a selected truck as a MapLibre line layer.
  * Data fetched from /histlocations/ POST endpoint.
+ *
+ * useTrail() hook is exported so App.jsx can call fetchTrail via mapRef.showTrail().
  */
 import { useState, useCallback } from 'react'
-import { Polyline } from 'react-leaflet'
+import { Source, Layer } from 'react-map-gl/maplibre'
 
 export function useTrail() {
   const [trail, setTrail] = useState([])
@@ -17,7 +19,8 @@ export function useTrail() {
         body:    JSON.stringify({ vid, tid }),
       })
       const data = await res.json()
-      const coords = (data.points || []).map(p => [p.lat, p.lng])
+      // GeoJSON coordinates are [longitude, latitude] — note swap from Leaflet [lat, lng]
+      const coords = (data.points || []).map(p => [p.lng, p.lat])
       setTrail(coords)
     } catch (e) {
       console.warn('[TrailLayer] fetch failed', e)
@@ -26,24 +29,28 @@ export function useTrail() {
   }, [])
 
   const clearTrail = useCallback(() => setTrail([]), [])
-
   return { trail, fetchTrail, clearTrail }
+}
+
+const TRAIL_LAYER = {
+  id:   'trail-line',
+  type: 'line',
+  paint: { 'line-color': '#1D9E75', 'line-width': 3, 'line-opacity': 0.85 },
+  layout: { 'line-cap': 'round', 'line-join': 'round' },
 }
 
 export default function TrailLayer({ trail }) {
   if (!trail || trail.length < 2) return null
 
+  const geojson = {
+    type: 'Feature',
+    geometry: { type: 'LineString', coordinates: trail },
+    properties: {},
+  }
+
   return (
-    <Polyline
-      positions={trail}
-      pathOptions={{
-        color:     '#1D9E75',
-        weight:    3,
-        opacity:   0.85,
-        lineCap:   'round',
-        lineJoin:  'round',
-        dashArray: null,
-      }}
-    />
+    <Source id="trail" type="geojson" data={geojson}>
+      <Layer {...TRAIL_LAYER} />
+    </Source>
   )
 }

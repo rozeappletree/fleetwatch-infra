@@ -1,0 +1,284 @@
+{
+  "version": 8,
+  "name": "FleetWatch",
+  "sources": {
+    "osm-raster": {
+      "type": "raster",
+      "tiles": ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+      "tileSize": 256,
+      "attribution": "© OpenStreetMap contributors",
+      "maxzoom": 19
+    },
+    "google-hybrid": {
+      "type": "raster",
+      "tiles": ["https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}"],
+      "tileSize": 256,
+      "attribution": "© Google",
+      "maxzoom": 21
+    },
+    "roads": {
+      "type": "vector",
+      "tiles": ["http://localhost:3001/fn_roads_mvt/{z}/{x}/{y}"],
+      "minzoom": 8,
+      "maxzoom": 18
+    },
+    "places": {
+      "type": "vector",
+      "tiles": ["http://localhost:3001/fn_places_mvt/{z}/{x}/{y}"],
+      "minzoom": 5,
+      "maxzoom": 18
+    },
+    "railways": {
+      "type": "vector",
+      "tiles": ["http://localhost:3001/fn_railways_mvt/{z}/{x}/{y}"],
+      "minzoom": 8,
+      "maxzoom": 18
+    },
+    "water": {
+      "type": "vector",
+      "tiles": ["http://localhost:3001/fn_water_mvt/{z}/{x}/{y}"],
+      "minzoom": 10,
+      "maxzoom": 18
+    },
+    "poi": {
+      "type": "vector",
+      "tiles": ["http://localhost:3001/fn_poi_mvt/{z}/{x}/{y}"],
+      "minzoom": 14,
+      "maxzoom": 18
+    },
+    "port": {
+      "type": "vector",
+      "tiles": ["http://localhost:3001/fn_port_mvt/{z}/{x}/{y}"],
+      "minzoom": 10,
+      "maxzoom": 18
+    }
+  },
+  "layers": [
+    {
+      "id": "base-tiles",
+      "type": "raster",
+      "source": "osm-raster",
+      "paint": { "raster-opacity": 0.4, "raster-saturation": -0.8 }
+    },
+    {
+      "id": "base-google-hybrid",
+      "type": "raster",
+      "source": "google-hybrid",
+      "layout": { "visibility": "none" },
+      "paint": { "raster-opacity": 1.0 }
+    },
+    {
+      "id": "water-fill",
+      "type": "fill",
+      "source": "water",
+      "source-layer": "water",
+      "paint": { "fill-color": "#1e40af", "fill-opacity": 0.35 }
+    },
+    {
+      "id": "water-outline",
+      "type": "line",
+      "source": "water",
+      "source-layer": "water",
+      "paint": { "line-color": "#1d4ed8", "line-width": 1.5, "line-opacity": 0.8 }
+    },
+    {
+      "id": "port-industrial-fill",
+      "type": "fill",
+      "source": "port",
+      "source-layer": "port",
+      "minzoom": 10,
+      "filter": ["==", "fclass", "industrial"],
+      "paint": { "fill-color": "#7c3aed", "fill-opacity": 0.12 }
+    },
+    {
+      "id": "port-industrial-outline",
+      "type": "line",
+      "source": "port",
+      "source-layer": "port",
+      "minzoom": 10,
+      "filter": ["==", "fclass", "industrial"],
+      "paint": { "line-color": "#7c3aed", "line-width": 1.0, "line-opacity": 0.5 }
+    },
+    {
+      "id": "port-terminal-fill",
+      "type": "fill",
+      "source": "port",
+      "source-layer": "port",
+      "minzoom": 10,
+      "filter": ["==", "fclass", "ferry_terminal"],
+      "paint": { "fill-color": "#0891b2", "fill-opacity": 0.35 }
+    },
+    {
+      "id": "port-terminal-outline",
+      "type": "line",
+      "source": "port",
+      "source-layer": "port",
+      "minzoom": 10,
+      "filter": ["==", "fclass", "ferry_terminal"],
+      "paint": { "line-color": "#0891b2", "line-width": 2.0, "line-opacity": 0.9 }
+    },
+    {
+      "id": "port-terminal-label",
+      "type": "symbol",
+      "source": "port",
+      "source-layer": "port",
+      "minzoom": 12,
+      "filter": ["all", ["==", "fclass", "ferry_terminal"], ["has", "name"]],
+      "layout": {
+        "text-field": ["get", "name"],
+        "text-font": ["Open Sans Regular"],
+        "text-size": 11,
+        "text-anchor": "center"
+      },
+      "paint": {
+        "text-color": "#67e8f9",
+        "text-halo-color": "#0f172a",
+        "text-halo-width": 1.5
+      }
+    },
+    {
+      "id": "roads-footway",
+      "type": "line",
+      "source": "roads",
+      "source-layer": "roads",
+      "minzoom": 16,
+      "filter": ["in", "fclass", "footway", "path", "steps", "bridleway", "cycleway", "pedestrian", "unknown"],
+      "paint": { "line-color": "#475569", "line-width": 1.0, "line-opacity": 0.6, "line-dasharray": [3, 2] }
+    },
+    {
+      "id": "roads-track",
+      "type": "line",
+      "source": "roads",
+      "source-layer": "roads",
+      "minzoom": 15,
+      "filter": ["in", "fclass", "track", "track_grade1", "track_grade2", "track_grade3", "track_grade4", "track_grade5"],
+      "paint": { "line-color": "#78716c", "line-width": 1.2, "line-opacity": 0.7, "line-dasharray": [4, 3] }
+    },
+    {
+      "id": "roads-residential",
+      "type": "line",
+      "source": "roads",
+      "source-layer": "roads",
+      "minzoom": 15,
+      "filter": ["in", "fclass", "residential", "living_street", "busway"],
+      "paint": { "line-color": "#1e293b", "line-width": 1.5, "line-opacity": 0.9 }
+    },
+    {
+      "id": "roads-unclassified",
+      "type": "line",
+      "source": "roads",
+      "source-layer": "roads",
+      "minzoom": 14,
+      "filter": ["in", "fclass", "service", "unclassified"],
+      "paint": { "line-color": "#334155", "line-width": 1.5, "line-opacity": 0.85 }
+    },
+    {
+      "id": "roads-tertiary",
+      "type": "line",
+      "source": "roads",
+      "source-layer": "roads",
+      "minzoom": 14,
+      "filter": ["in", "fclass", "tertiary", "tertiary_link"],
+      "paint": { "line-color": "#0f766e", "line-width": 2.5, "line-opacity": 1.0 }
+    },
+    {
+      "id": "roads-secondary",
+      "type": "line",
+      "source": "roads",
+      "source-layer": "roads",
+      "minzoom": 12,
+      "filter": ["in", "fclass", "secondary", "secondary_link"],
+      "paint": { "line-color": "#15803d", "line-width": 3.0, "line-opacity": 1.0 }
+    },
+    {
+      "id": "roads-primary",
+      "type": "line",
+      "source": "roads",
+      "source-layer": "roads",
+      "minzoom": 10,
+      "filter": ["in", "fclass", "primary", "primary_link"],
+      "paint": { "line-color": "#a16207", "line-width": 3.5, "line-opacity": 1.0 }
+    },
+    {
+      "id": "roads-trunk",
+      "type": "line",
+      "source": "roads",
+      "source-layer": "roads",
+      "minzoom": 8,
+      "filter": ["in", "fclass", "trunk", "trunk_link"],
+      "paint": { "line-color": "#c2410c", "line-width": 4.0, "line-opacity": 1.0 }
+    },
+    {
+      "id": "roads-motorway",
+      "type": "line",
+      "source": "roads",
+      "source-layer": "roads",
+      "minzoom": 8,
+      "filter": ["in", "fclass", "motorway", "motorway_link"],
+      "paint": { "line-color": "#be123c", "line-width": 5.0, "line-opacity": 1.0 }
+    },
+    {
+      "id": "railways-line",
+      "type": "line",
+      "source": "railways",
+      "source-layer": "railways",
+      "minzoom": 8,
+      "paint": {
+        "line-color": "#7e22ce",
+        "line-width": 3.0,
+        "line-dasharray": [8, 6],
+        "line-opacity": 1.0
+      }
+    },
+    {
+      "id": "places-label",
+      "type": "symbol",
+      "source": "places",
+      "source-layer": "places",
+      "minzoom": 5,
+      "layout": {
+        "text-field": ["get", "name"],
+        "text-font": ["Open Sans Regular"],
+        "text-size": ["interpolate", ["linear"], ["zoom"],
+          5, 10,
+          10, 13,
+          14, 15
+        ],
+        "text-anchor": "center",
+        "text-allow-overlap": false
+      },
+      "paint": {
+        "text-color": "#f8fafc",
+        "text-halo-color": "#0f172a",
+        "text-halo-width": 1.5
+      }
+    },
+    {
+      "id": "poi-fuel",
+      "type": "circle",
+      "source": "poi",
+      "source-layer": "poi",
+      "minzoom": 14,
+      "filter": ["==", "fclass", "fuel"],
+      "paint": { "circle-color": "#16a34a", "circle-radius": 5, "circle-stroke-color": "#fff", "circle-stroke-width": 1.5 }
+    },
+    {
+      "id": "poi-crossing",
+      "type": "circle",
+      "source": "poi",
+      "source-layer": "poi",
+      "minzoom": 14,
+      "filter": ["==", "fclass", "railway_crossing"],
+      "paint": { "circle-color": "#dc2626", "circle-radius": 4, "circle-stroke-color": "#fff", "circle-stroke-width": 1.5 }
+    },
+    {
+      "id": "poi-signals",
+      "type": "circle",
+      "source": "poi",
+      "source-layer": "poi",
+      "minzoom": 16,
+      "filter": ["==", "fclass", "traffic_signals"],
+      "paint": { "circle-color": "#eab308", "circle-radius": 3, "circle-stroke-color": "#fff", "circle-stroke-width": 1.5 }
+    }
+  ]
+}
